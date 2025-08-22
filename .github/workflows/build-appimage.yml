@@ -54,7 +54,7 @@ jobs:
           Exec=AppRun
           Icon=engdeck
           Type=Application
-          Categories=Education;Language;
+          Categories=Education;X-Language;
           EOF
 
           cp "$APPDIR/usr/share/applications/engdeck.desktop" "$APPDIR/engdeck.desktop"

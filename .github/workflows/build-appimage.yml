@@ -16,10 +16,7 @@ jobs:
           sudo apt-get install -y build-essential cmake git curl wget xz-utils ffmpeg nodejs npm
 
       - name: Install CURL dependencies
-        run: sudo apt-get install -y libcurl4-openssl-dev
-
-      - name: Install FUSE
-        run: sudo apt-get install -y libfuse2
+        run: sudo apt-get install -y libcurl4-openssl-dev libfuse2 appstream
 
       - name: Build third-party engines (whisper.cpp, llama.cpp)
         run: |

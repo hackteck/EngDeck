@@ -1,0 +1,141 @@
+name: Build AppImage (Manual)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build-appimage:
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install system deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential cmake git curl wget xz-utils ffmpeg nodejs npm
+
+      - name: Build third-party engines (whisper.cpp, llama.cpp)
+        run: |
+          bash scripts/build.sh
+
+      - name: Download models
+        run: |
+          bash scripts/download_models.sh
+
+      - name: Build frontend (Vue -> static)
+        working-directory: apps/web
+        run: |
+          npm install
+          npm run build
+
+      - name: Prepare AppDir layout
+        run: |
+          set -euo pipefail
+          APPDIR="${{ github.workspace }}/AppDir"
+          mkdir -p "$APPDIR/usr/bin" "$APPDIR/usr/app" "$APPDIR/usr/share/applications" "$APPDIR/usr/share/icons/hicolor/256x256/apps"
+
+          # Copy application code
+          cp -r apps/server "$APPDIR/usr/app/server"
+          cp -r apps/web/dist "$APPDIR/usr/app/web"
+          mkdir -p "$APPDIR/usr/app/models"
+          cp -r models "$APPDIR/usr/app/models"
+          mkdir -p "$APPDIR/usr/app/external"
+          cp -r external/whisper.cpp/build/bin "$APPDIR/usr/app/external/whisper_bin"
+          cp -r external/llama.cpp/build/bin "$APPDIR/usr/app/external/llama_bin"
+
+          # Desktop file
+          cat > "$APPDIR/usr/share/applications/engdeck.desktop" <<EOF
+          [Desktop Entry]
+          Name=EngDeck
+          Exec=AppRun
+          Icon=engdeck
+          Type=Application
+          Categories=Education;Language;
+          EOF
+
+          # Icon
+          mkdir -p assets || true
+          if [ ! -f assets/logo.png ]; then
+            # create a simple placeholder icon if missing
+            convert -size 256x256 xc:white -pointsize 72 -gravity center -annotate 0 "ED" assets/logo.png || true
+          fi
+          cp assets/logo.png "$APPDIR/usr/share/icons/hicolor/256x256/apps/engdeck.png"
+
+      - name: Embed standalone Python (python-build-standalone) and install deps
+        run: |
+          set -euo pipefail
+          APPDIR="${{ github.workspace }}/AppDir"
+          cd "$APPDIR/usr"
+          # Download CPython standalone
+          PY_URL="https://github.com/indygreg/python-build-standalone/releases/download/20240926/cpython-3.10.14+20240926-x86_64-unknown-linux-gnu-install_only.tar.gz"
+          curl -L "$PY_URL" -o python.tar.gz
+          tar -xzf python.tar.gz
+          rm python.tar.gz
+          # Ensure pip works, then install Python deps into this embedded Python
+          ./python/bin/python3 -m ensurepip
+          ./python/bin/python3 -m pip install --upgrade pip
+          ./python/bin/python3 -m pip install -r "${{ github.workspace }}/apps/server/requirements.txt"
+
+          # Place launcher
+          cat > "${{ github.workspace }}/AppDir/usr/bin/launcher.py" <<'PY'
+          import os, subprocess, sys, signal, time, webbrowser, pathlib
+          HERE = pathlib.Path(__file__).resolve().parent
+          APP_ROOT = HERE.parent / "app"
+          SERVER_DIR = APP_ROOT / "server"
+          ENV = os.environ.copy()
+          # point server to bundled external binaries and models
+          ENV["ENGDECK_WHISPER_BIN"] = str(APP_ROOT / "external" / "whisper_bin" / "whisper-cli")
+          ENV["ENGDECK_LLAMA_BIN"] = str(APP_ROOT / "external" / "llama_bin" / "llama-cli")
+          ENV["ENGDECK_WHISPER_MODEL"] = str(APP_ROOT / "models" / "whisper" / "ggml-base.en.bin")
+          ENV["ENGDECK_LLAMA_MODEL"] = str(APP_ROOT / "models" / "llm" / "TinyLlama-1.1B-Chat-v1.0.Q4_K_M.gguf")
+          # Start uvicorn
+          uv_cmd = [sys.executable, "-m", "uvicorn", "main:app", "--host", "127.0.0.1", "--port", "8000"]
+          proc = subprocess.Popen(uv_cmd, cwd=str(SERVER_DIR), env=ENV)
+          # Wait a moment for server to boot
+          time.sleep(2)
+          try:
+            webbrowser.open("http://127.0.0.1:8000/")
+          except Exception:
+            pass
+          # Wait until killed
+          try:
+            proc.wait()
+          except KeyboardInterrupt:
+            proc.terminate()
+            proc.wait()
+          PY
+
+      - name: AppRun and metadata
+        run: |
+          set -euo pipefail
+          APPDIR="${{ github.workspace }}/AppDir"
+          cat > "$APPDIR/AppRun" <<'EOF'
+          #!/usr/bin/env bash
+          HERE="$(dirname "$(readlink -f "$0")")"
+          export PATH="$HERE/usr/python/bin:$PATH"
+          export PYTHONHOME="$HERE/usr/python"
+          export PYTHONPATH="$HERE/usr/python/lib/python3.10/site-packages"
+          # Fallback: if env overrides provided by launcher
+          export ENGDECK_WHISPER_BIN="${ENGDECK_WHISPER_BIN:-$HERE/usr/app/external/whisper_bin/whisper-cli}"
+          export ENGDECK_LLAMA_BIN="${ENGDECK_LLAMA_BIN:-$HERE/usr/app/external/llama_bin/llama-cli}"
+          export ENGDECK_WHISPER_MODEL="${ENGDECK_WHISPER_MODEL:-$HERE/usr/app/models/whisper/ggml-base.en.bin}"
+          export ENGDECK_LLAMA_MODEL="${ENGDECK_LLAMA_MODEL:-$HERE/usr/app/models/llm/TinyLlama-1.1B-Chat-v1.0.Q4_K_M.gguf}"
+          exec "$HERE/usr/python/bin/python3" "$HERE/usr/bin/launcher.py"
+          EOF
+          chmod +x "$APPDIR/AppRun"
+
+      - name: Download appimagetool
+        run: |
+          wget -q https://github.com/AppImage/AppImageKit/releases/download/continuous/appimagetool-x86_64.AppImage
+          chmod +x appimagetool-x86_64.AppImage
+
+      - name: Build AppImage
+        run: |
+          ./appimagetool-x86_64.AppImage AppDir EngDeck-x86_64.AppImage
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: EngDeck-AppImage
+          path: EngDeck-x86_64.AppImage

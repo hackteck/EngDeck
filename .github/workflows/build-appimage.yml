@@ -71,7 +71,7 @@ jobs:
           APPDIR="${{ github.workspace }}/AppDir"
           cd "$APPDIR/usr"
           # Download CPython standalone
-          PY_URL="https://github.com/indygreg/python-build-standalone/releases/download/20240926/cpython-3.10.14+20240926-x86_64-unknown-linux-gnu-install_only.tar.gz"
+          PY_URL="https://github.com/astral-sh/python-build-standalone/releases/download/20250818/cpython-3.10.18+20250818-x86_64-unknown-linux-gnu-install_only.tar.gz"
           curl -L "$PY_URL" -o python.tar.gz
           tar -xzf python.tar.gz
           rm python.tar.gz

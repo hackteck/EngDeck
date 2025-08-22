@@ -57,6 +57,8 @@ jobs:
           Categories=Education;Language;
           EOF
 
+          cp "$APPDIR/usr/share/applications/engdeck.desktop" "$APPDIR/engdeck.desktop"
+
           # Icon
           mkdir -p assets || true
           if [ ! -f assets/logo.png ]; then

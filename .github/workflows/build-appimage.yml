@@ -58,6 +58,9 @@ jobs:
           EOF
 
           cp "$APPDIR/usr/share/applications/engdeck.desktop" "$APPDIR/engdeck.desktop"
+          # Иконка (поставим заглушку, можно заменить своей)
+          wget -O "$APPDIR/engdeck.png" https://upload.wikimedia.org/wikipedia/commons/thumb/e/e0/OOjs_UI_icon_language-ltr-progressive.svg/256px-OOjs_UI_icon_language-ltr-progressive.svg.png
+
 
           # Icon
           mkdir -p assets || true
